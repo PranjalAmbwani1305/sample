@@ -1,7 +1,6 @@
 pinecone-client==2.0.0
-torch
+torch==1.10.0  
 transformers
 streamlit
-shutil
 pandas
 numpy
