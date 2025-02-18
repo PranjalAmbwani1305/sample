@@ -1,8 +1,4 @@
-pinecone-client==2.0.0
-torch==1.10.0  
+pinecone-client
+torch==2.2.0
 transformers
 streamlit
-pandas
-numpy
-shutil
-pathlib
