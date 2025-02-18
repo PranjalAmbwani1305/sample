@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 from pathlib import Path
@@ -40,7 +41,6 @@ def extract_project_details(content):
         "Project Description": None
     }
     
-    # Use regular expressions or string matching to extract specific fields
     project_details["Project Title"] = re.search(r"Project Title[:\*]?\s*(.*)", content)
     project_details["Project Location"] = re.search(r"Project Location[:\*]?\s*(.*)", content)
     project_details["Project Duration"] = re.search(r"Project Duration[:\*]?\s*(.*)", content)
@@ -49,7 +49,6 @@ def extract_project_details(content):
     project_details["Project Budget"] = re.search(r"Project Budget[:\*]?\s*(.*)", content)
     project_details["Project Description"] = re.search(r"Project Description[:\*]?\s*(.*)", content)
     
-    # Extract the values from the regex match groups
     for key in project_details:
         if project_details[key]:
             project_details[key] = project_details[key].group(1).strip()
@@ -121,11 +120,14 @@ def store_in_pinecone(file_name, project_details, embeddings):
         if project_details and embeddings:
             vector = embeddings
 
-            # Store structured project details and content without additional metadata
+            # Convert project_details dictionary to JSON string
+            project_details_str = json.dumps(project_details)
+
+            # Store structured project details as a JSON string and embeddings
             metadata = {
                 "file_name": file_name,
                 "file_type": "unknown",  # You can customize this if needed
-                "project_details": project_details  # Structured project details
+                "project_details": project_details_str  # Store as a JSON string
             }
 
             if len(vector) == 768:
