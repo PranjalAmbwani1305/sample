@@ -2,7 +2,7 @@ import json
 import os
 import shutil
 from pathlib import Path
-from pinecone import Pinecone, ServerlessSpec
+from pinecone import Pinecone
 from transformers import AutoTokenizer, AutoModel
 import torch
 import streamlit as st
@@ -11,18 +11,17 @@ from docx import Document
 import uuid
 import re
 
-# Load secrets from Streamlit
+# Initialize Pinecone instance
 api_key = st.secrets["pinecone"]["api_key"]
 env = st.secrets["pinecone"]["ENV"]
 index_name = st.secrets["pinecone"]["INDEX_NAME"]
 hf_token = st.secrets["huggingface"]["token"]
 storage_folder = "file_storage"  # Folder for external storage
 
-# Initialize Pinecone instance
 pc = Pinecone(api_key=api_key, environment=env)
 
-# Initialize transformer model
-model_name = "distilbert-base-uncased"  # A smaller, easier model
+# Initialize Huggingface transformer model
+model_name = "distilbert-base-uncased"
 tokenizer = AutoTokenizer.from_pretrained(model_name, use_auth_token=hf_token)
 model = AutoModel.from_pretrained(model_name, use_auth_token=hf_token)
 
@@ -30,7 +29,7 @@ model = AutoModel.from_pretrained(model_name, use_auth_token=hf_token)
 os.makedirs(storage_folder, exist_ok=True)
 
 def extract_project_details(content):
-    """Extract project details like Project Title, Location, Budget, etc."""
+    """Extract structured project details from content"""
     project_details = {
         "Project Title": None,
         "Project Location": None,
@@ -40,7 +39,7 @@ def extract_project_details(content):
         "Project Budget": None,
         "Project Description": None
     }
-    
+
     project_details["Project Title"] = re.search(r"Project Title[:\*]?\s*(.*)", content)
     project_details["Project Location"] = re.search(r"Project Location[:\*]?\s*(.*)", content)
     project_details["Project Duration"] = re.search(r"Project Duration[:\*]?\s*(.*)", content)
@@ -48,11 +47,12 @@ def extract_project_details(content):
     project_details["Location of Work"] = re.search(r"Location of work[:\*]?\s*(.*)", content)
     project_details["Project Budget"] = re.search(r"Project Budget[:\*]?\s*(.*)", content)
     project_details["Project Description"] = re.search(r"Project Description[:\*]?\s*(.*)", content)
-    
+
+    # Extract matched values from regex
     for key in project_details:
         if project_details[key]:
             project_details[key] = project_details[key].group(1).strip()
-    
+
     return project_details
 
 def process_text_file(file_path):
@@ -81,8 +81,8 @@ def process_pdf_file(file_path):
                 content += page.extract_text()
 
         project_details = extract_project_details(content)
-        
-        if content.strip():  # If there's any text content in the PDF
+
+        if content.strip():
             inputs = tokenizer(content, return_tensors="pt", padding=True, truncation=True)
             with torch.no_grad():
                 embeddings = model(**inputs).last_hidden_state.mean(dim=1).squeeze().tolist()
@@ -103,7 +103,7 @@ def process_docx_file(file_path):
 
         project_details = extract_project_details(content)
 
-        if content.strip():  # If there's any text content in the DOCX
+        if content.strip():
             inputs = tokenizer(content, return_tensors="pt", padding=True, truncation=True)
             with torch.no_grad():
                 embeddings = model(**inputs).last_hidden_state.mean(dim=1).squeeze().tolist()
@@ -115,21 +115,22 @@ def process_docx_file(file_path):
         return None, None
 
 def store_in_pinecone(file_name, project_details, embeddings):
-    """Store the embeddings and project details in Pinecone"""
+    """Store embeddings and project details in Pinecone"""
     try:
         if project_details and embeddings:
             vector = embeddings
 
-            # Convert project_details dictionary to JSON string
+            # Convert project details dictionary to JSON string
             project_details_str = json.dumps(project_details)
 
-            # Store structured project details as a JSON string and embeddings
+            # Store metadata as JSON string and embeddings
             metadata = {
                 "file_name": file_name,
                 "file_type": "unknown",  # You can customize this if needed
                 "project_details": project_details_str  # Store as a JSON string
             }
 
+            # Ensure the embeddings are of the correct dimension (e.g., 768 for BERT)
             if len(vector) == 768:
                 index = pc.Index(index_name)
                 index.upsert([(file_name, vector, metadata)])
@@ -137,12 +138,12 @@ def store_in_pinecone(file_name, project_details, embeddings):
             else:
                 st.error(f"Invalid vector dimension for {file_name}. Expected 768, got {len(vector)}.")
         else:
-            st.warning(f"No content to store for {file_name}. Skipping.")
+            st.warning(f"No content found for {file_name}. Skipping.")
     except Exception as e:
         st.error(f"Error storing {file_name} in Pinecone: {e}")
 
 def main():
-    st.title("Folder Upload and Pinecone Storage")
+    st.title("Upload and Store Project Data in Pinecone")
 
     uploaded_folder = st.file_uploader("Choose a folder to upload", type=["zip"], accept_multiple_files=False)
 
