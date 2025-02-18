@@ -1,6 +1,7 @@
 import os
 import streamlit as st
 import pinecone
+from pinecone import Pinecone as PineconeClient
 import shutil
 from pathlib import Path
 
@@ -11,8 +12,8 @@ api_key = st.secrets["pinecone"]["api_key"]
 pinecone.init(api_key=api_key)
 
 # Index setup
-index_name = "folder-content-index"
-dimension = 512  # You can adjust this depending on the type of data you're storing
+index_name = "tender_data"
+dimension = 384  # You can adjust this depending on the type of data you're storing
 
 # Create the index if it doesn't exist
 if index_name not in pinecone.list_indexes():
