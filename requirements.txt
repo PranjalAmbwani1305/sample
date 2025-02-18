@@ -5,4 +5,4 @@ transformers
 pymupdf
 python-docx
 PyPDF2
-boto3
+numpy
