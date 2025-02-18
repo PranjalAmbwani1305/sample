@@ -15,7 +15,7 @@ index_name = st.secrets["pinecone"]["INDEX_NAME"]
 hf_token = st.secrets["huggingface"]["token"]
 
 # Initialize Pinecone
-pinecone.init(api_key=api_key, environment=env)
+pc = pinecone.init(api_key=api_key, environment=env)
 index = pinecone.Index(index_name)
 
 # Load the Hugging Face model
