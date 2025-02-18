@@ -12,15 +12,6 @@ api_key = st.secrets["pinecone"]["api_key"]
 # Initialize Pinecone
 pinecone.init(api_key=api_key)
 
-# Index setup
-index_name = "tender_data"
-dimension = 768  # Adjust based on your model output size
-
-# Create the index if it doesn't exist
-if index_name not in pinecone.list_indexes():
-    pinecone.create_index(index_name, dimension=dimension)
-
-index = pinecone.Index(index_name)
 
 # Load the Mixtral model and tokenizer for text embedding
 model_name = "huggingface/Mixtral"  # Replace with the exact Mixtral model name from Hugging Face
@@ -29,7 +20,7 @@ model = AutoModel.from_pretrained(model_name)
 
 def process_file(file_path):
     """Process file content into embeddings using Mixtral model."""
-    with open(file_path, 'r') as file:
+    with open(file_path, 'r', encoding="utf-8") as file:
         content = file.read()
 
     # Tokenize and create embeddings
@@ -69,9 +60,10 @@ def main():
 
         # Process and store each file in Pinecone
         for file in Path(save_path).rglob('*.*'):
-            st.write(f"Processing {file.name}...")
-            file_content = process_file(file)
-            store_in_pinecone(file.stem, file_content)
+            if file.is_file():
+                st.write(f"Processing {file.name}...")
+                file_content = process_file(file)
+                store_in_pinecone(file.stem, file_content)
 
         st.success("Folder contents stored in Pinecone.")
 
