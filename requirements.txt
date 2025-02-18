@@ -1,4 +1,4 @@
 streamlit
-pinecone-client
 python-dotenv
 shutil
+pinecone-client==2.0.0
