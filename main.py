@@ -29,25 +29,19 @@ model = AutoModel.from_pretrained(model_name, use_auth_token=hf_token)
 os.makedirs(storage_folder, exist_ok=True)
 
 def extract_important_data(content):
-    """Extract important data from content using regex."""
+    """Extract important data from tender content using regex."""
     important_data = {
         "Tender Title": None,
         "Tender Number": None,
-        "Tender Date": None,
         "Tender Description": None,
-        "Tender Budget": None,
-        "Tender Location": None,
-        "Submission Deadline": None
+        "Tender Date": None
     }
 
-    # Use regular expressions to find important fields like "Tender Title", "Tender Number", etc.
+    # Use regular expressions to find fields like "Tender Title", "Tender Number", etc.
     important_data["Tender Title"] = re.search(r"Tender Title[:\*]?\s*(.*)", content)
     important_data["Tender Number"] = re.search(r"Tender Number[:\*]?\s*(.*)", content)
-    important_data["Tender Date"] = re.search(r"Tender Date[:\*]?\s*(.*)", content)
     important_data["Tender Description"] = re.search(r"Tender Description[:\*]?\s*(.*)", content)
-    important_data["Tender Budget"] = re.search(r"Tender Budget[:\*]?\s*(.*)", content)
-    important_data["Tender Location"] = re.search(r"Tender Location[:\*]?\s*(.*)", content)
-    important_data["Submission Deadline"] = re.search(r"Submission Deadline[:\*]?\s*(.*)", content)
+    important_data["Tender Date"] = re.search(r"Tender Date[:\*]?\s*(.*)", content)
 
     # Extract matched values from regex
     for key in important_data:
@@ -63,7 +57,7 @@ def process_text_file(file_path):
         with open(file_path, 'r', encoding="utf-8") as file:
             content = file.read()
 
-        # If content is empty, return empty details and skip
+        # If content is empty, return empty data and skip
         if not content.strip():
             return None, None
 
@@ -86,7 +80,7 @@ def process_pdf_file(file_path):
             for page in reader.pages:
                 content += page.extract_text()
 
-        # If content is empty, return empty details and skip
+        # If content is empty, return empty data and skip
         if not content.strip():
             return None, None
 
@@ -109,7 +103,7 @@ def process_docx_file(file_path):
         for para in doc.paragraphs:
             content += para.text
 
-        # If content is empty, return empty details and skip
+        # If content is empty, return empty data and skip
         if not content.strip():
             return None, None
 
@@ -125,26 +119,41 @@ def process_docx_file(file_path):
         return None, None
 
 def store_in_pinecone(file_name, important_data, embeddings):
-    """Store embeddings and important data in Pinecone"""
+    """Store embeddings and full content reference in Pinecone"""
     try:
         if important_data and embeddings:
-            vector = embeddings  # Directly using the list format embeddings
+            # Store full content in local storage
+            content = important_data.get("Tender Description", "")
+            
+            # For simplicity, store the full content locally in "content_storage" folder
+            content_storage_folder = "content_storage"
+            os.makedirs(content_storage_folder, exist_ok=True)
 
-            # Convert important data dictionary to JSON string
-            important_data_str = json.dumps(important_data)
+            # Generate a unique filename for the content file
+            content_file_path = os.path.join(content_storage_folder, f"{file_name}.txt")
 
-            # Store metadata as JSON string and embeddings
+            # Save the content to a text file
+            with open(content_file_path, 'w', encoding="utf-8") as content_file:
+                content_file.write(content)
+
+            # Store a reference to the file (file path) in Pinecone
+            content_reference = content_file_path  # Local file path
+
+            # Create metadata with the reference
             metadata = {
                 "file_name": file_name,
-                "file_type": "unknown",  # You can customize this if needed
-                "important_data": important_data_str  # Store as a JSON string
+                "content_reference": content_reference,  # Reference to the content file
+                "tender_title": important_data.get("Tender Title", "Not Available"),
+                "tender_number": important_data.get("Tender Number", "Not Available")
             }
+
+            vector = embeddings  # Directly using the list format embeddings
 
             # Ensure the embeddings are of the correct dimension (e.g., 768 for BERT)
             if len(vector) == 768:
                 index = pc.Index(index_name)
                 index.upsert([(file_name, vector, metadata)])
-                st.write(f"Stored {file_name} in Pinecone with important data.")
+                st.write(f"Stored {file_name} in Pinecone with content reference.")
             else:
                 st.error(f"Invalid vector dimension for {file_name}. Expected 768, got {len(vector)}.")
         else:
