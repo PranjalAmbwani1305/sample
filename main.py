@@ -8,6 +8,7 @@ import streamlit as st
 from PyPDF2 import PdfReader
 from docx import Document
 import uuid
+import re
 
 # Load secrets from Streamlit
 api_key = st.secrets["pinecone"]["api_key"]
@@ -27,17 +28,46 @@ model = AutoModel.from_pretrained(model_name, use_auth_token=hf_token)
 # Make sure storage folder exists
 os.makedirs(storage_folder, exist_ok=True)
 
+def extract_project_details(content):
+    """Extract project details like Project Title, Location, Budget, etc."""
+    project_details = {
+        "Project Title": None,
+        "Project Location": None,
+        "Project Duration": None,
+        "Name of Work": None,
+        "Location of Work": None,
+        "Project Budget": None,
+        "Project Description": None
+    }
+    
+    # Use regular expressions or string matching to extract specific fields
+    project_details["Project Title"] = re.search(r"Project Title[:\*]?\s*(.*)", content)
+    project_details["Project Location"] = re.search(r"Project Location[:\*]?\s*(.*)", content)
+    project_details["Project Duration"] = re.search(r"Project Duration[:\*]?\s*(.*)", content)
+    project_details["Name of Work"] = re.search(r"Name of Work[:\*]?\s*(.*)", content)
+    project_details["Location of Work"] = re.search(r"Location of work[:\*]?\s*(.*)", content)
+    project_details["Project Budget"] = re.search(r"Project Budget[:\*]?\s*(.*)", content)
+    project_details["Project Description"] = re.search(r"Project Description[:\*]?\s*(.*)", content)
+    
+    # Extract the values from the regex match groups
+    for key in project_details:
+        if project_details[key]:
+            project_details[key] = project_details[key].group(1).strip()
+    
+    return project_details
+
 def process_text_file(file_path):
     """Process text files and extract embeddings"""
     try:
         with open(file_path, 'r', encoding="utf-8") as file:
             content = file.read()
 
+        project_details = extract_project_details(content)
         inputs = tokenizer(content, return_tensors="pt", padding=True, truncation=True)
         with torch.no_grad():
             embeddings = model(**inputs).last_hidden_state.mean(dim=1).squeeze().tolist()
 
-        return content, embeddings
+        return project_details, embeddings
     except Exception as e:
         st.error(f"Error processing text file {file_path}: {e}")
         return None, None
@@ -50,12 +80,14 @@ def process_pdf_file(file_path):
             content = ''
             for page in reader.pages:
                 content += page.extract_text()
+
+        project_details = extract_project_details(content)
         
         if content.strip():  # If there's any text content in the PDF
             inputs = tokenizer(content, return_tensors="pt", padding=True, truncation=True)
             with torch.no_grad():
                 embeddings = model(**inputs).last_hidden_state.mean(dim=1).squeeze().tolist()
-            return content, embeddings
+            return project_details, embeddings
         else:
             return None, None
     except Exception as e:
@@ -70,39 +102,36 @@ def process_docx_file(file_path):
         for para in doc.paragraphs:
             content += para.text
 
+        project_details = extract_project_details(content)
+
         if content.strip():  # If there's any text content in the DOCX
             inputs = tokenizer(content, return_tensors="pt", padding=True, truncation=True)
             with torch.no_grad():
                 embeddings = model(**inputs).last_hidden_state.mean(dim=1).squeeze().tolist()
-            return content, embeddings
+            return project_details, embeddings
         else:
             return None, None
     except Exception as e:
         st.error(f"Error processing DOCX file {file_path}: {e}")
         return None, None
 
-def store_in_pinecone(file_name, full_content, embeddings, file_type):
-    """Store the embeddings and file metadata in Pinecone with a link to full content"""
+def store_in_pinecone(file_name, project_details, embeddings):
+    """Store the embeddings and project details in Pinecone"""
     try:
-        if full_content and embeddings:
-            # Store the full content externally in the file_storage folder
-            file_uuid = str(uuid.uuid4())  # Generate a unique identifier for the file
-            storage_path = Path(storage_folder) / f"{file_uuid}.txt"
-            with open(storage_path, 'w', encoding="utf-8") as file:
-                file.write(full_content)
-            
-            # Create metadata with a reference to the full content (external storage path)
+        if project_details and embeddings:
             vector = embeddings
-            
+
+            # Store structured project details and content without additional metadata
+            metadata = {
+                "file_name": file_name,
+                "file_type": "unknown",  # You can customize this if needed
+                "project_details": project_details  # Structured project details
+            }
+
             if len(vector) == 768:
                 index = pc.Index(index_name)
-                metadata = {
-                    "file_name": file_name,
-                    "file_type": file_type,
-                    "external_content_path": str(storage_path),  # Link to external file storage
-                }
                 index.upsert([(file_name, vector, metadata)])
-                st.write(f"Stored {file_name} in Pinecone with external content reference.")
+                st.write(f"Stored {file_name} in Pinecone with project details.")
             else:
                 st.error(f"Invalid vector dimension for {file_name}. Expected 768, got {len(vector)}.")
         else:
@@ -139,23 +168,19 @@ def main():
             if file.is_file():
                 st.write(f"Processing {file.name}...")
                 try:
-                    file_content = None
+                    project_details = None
                     embeddings = None
-                    file_type = None
                     if file.suffix == '.txt':  # For text files
-                        file_content, embeddings = process_text_file(file)
-                        file_type = 'text'
+                        project_details, embeddings = process_text_file(file)
                     elif file.suffix == '.pdf':  # For PDF files
-                        file_content, embeddings = process_pdf_file(file)
-                        file_type = 'pdf'
+                        project_details, embeddings = process_pdf_file(file)
                     elif file.suffix == '.docx':  # For DOCX files
-                        file_content, embeddings = process_docx_file(file)
-                        file_type = 'docx'
+                        project_details, embeddings = process_docx_file(file)
 
-                    if file_content and embeddings:
-                        store_in_pinecone(file.stem, file_content, embeddings, file_type)
+                    if project_details and embeddings:
+                        store_in_pinecone(file.stem, project_details, embeddings)
                     else:
-                        st.warning(f"No text found in {file.name}. Skipping.")
+                        st.warning(f"No content found in {file.name}. Skipping.")
                 except Exception as e:
                     st.error(f"Error processing {file.name}: {e}")
 
