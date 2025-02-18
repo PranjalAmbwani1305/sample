@@ -1,4 +1,3 @@
-import json
 import os
 import shutil
 from pathlib import Path
@@ -28,29 +27,6 @@ model = AutoModel.from_pretrained(model_name, use_auth_token=hf_token)
 # Make sure storage folder exists
 os.makedirs(storage_folder, exist_ok=True)
 
-def extract_important_data(content):
-    """Extract important data from tender content using regex."""
-    important_data = {
-        "Tender Title": None,
-        "Tender Number": None,
-        "Tender Description": None,
-        "Tender Date": None
-    }
-
-    # Use regular expressions to find fields like "Tender Title", "Tender Number", etc.
-    important_data["Tender Title"] = re.search(r"Tender Title[:\*]?\s*(.*)", content)
-    important_data["Tender Number"] = re.search(r"Tender Number[:\*]?\s*(.*)", content)
-    important_data["Tender Description"] = re.search(r"Tender Description[:\*]?\s*(.*)", content)
-    important_data["Tender Date"] = re.search(r"Tender Date[:\*]?\s*(.*)", content)
-
-    # Extract matched values from regex
-    for key in important_data:
-        if important_data[key]:
-            important_data[key] = important_data[key].group(1).strip()
-
-    # Return important data with None replaced with 'Not Available'
-    return {key: (value if value else "Not Available") for key, value in important_data.items()}
-
 def process_text_file(file_path):
     """Process text files and extract embeddings"""
     try:
@@ -61,12 +37,12 @@ def process_text_file(file_path):
         if not content.strip():
             return None, None
 
-        important_data = extract_important_data(content)
+        # Tokenize and extract embeddings
         inputs = tokenizer(content, return_tensors="pt", padding=True, truncation=True)
         with torch.no_grad():
             embeddings = model(**inputs).last_hidden_state.mean(dim=1).squeeze().tolist()
 
-        return important_data, embeddings
+        return content, embeddings
     except Exception as e:
         st.error(f"Error processing text file {file_path}: {e}")
         return None, None
@@ -84,13 +60,12 @@ def process_pdf_file(file_path):
         if not content.strip():
             return None, None
 
-        important_data = extract_important_data(content)
-
+        # Tokenize and extract embeddings
         inputs = tokenizer(content, return_tensors="pt", padding=True, truncation=True)
         with torch.no_grad():
             embeddings = model(**inputs).last_hidden_state.mean(dim=1).squeeze().tolist()
 
-        return important_data, embeddings
+        return content, embeddings
     except Exception as e:
         st.error(f"Error processing PDF file {file_path}: {e}")
         return None, None
@@ -107,32 +82,28 @@ def process_docx_file(file_path):
         if not content.strip():
             return None, None
 
-        important_data = extract_important_data(content)
-
+        # Tokenize and extract embeddings
         inputs = tokenizer(content, return_tensors="pt", padding=True, truncation=True)
         with torch.no_grad():
             embeddings = model(**inputs).last_hidden_state.mean(dim=1).squeeze().tolist()
 
-        return important_data, embeddings
+        return content, embeddings
     except Exception as e:
         st.error(f"Error processing DOCX file {file_path}: {e}")
         return None, None
 
-def store_in_pinecone(file_name, important_data, embeddings):
-    """Store embeddings and full content reference in Pinecone"""
+def store_in_pinecone(file_name, content, embeddings):
+    """Store embeddings and full content in Pinecone"""
     try:
-        if important_data and embeddings:
+        if content and embeddings:
             # Store full content in local storage
-            content = important_data.get("Tender Description", "")
-            
-            # For simplicity, store the full content locally in "content_storage" folder
             content_storage_folder = "content_storage"
             os.makedirs(content_storage_folder, exist_ok=True)
 
             # Generate a unique filename for the content file
             content_file_path = os.path.join(content_storage_folder, f"{file_name}.txt")
 
-            # Save the content to a text file
+            # Save the full content to a text file
             with open(content_file_path, 'w', encoding="utf-8") as content_file:
                 content_file.write(content)
 
@@ -143,8 +114,6 @@ def store_in_pinecone(file_name, important_data, embeddings):
             metadata = {
                 "file_name": file_name,
                 "content_reference": content_reference,  # Reference to the content file
-                "tender_title": important_data.get("Tender Title", "Not Available"),
-                "tender_number": important_data.get("Tender Number", "Not Available")
             }
 
             vector = embeddings  # Directly using the list format embeddings
@@ -162,7 +131,7 @@ def store_in_pinecone(file_name, important_data, embeddings):
         st.error(f"Error storing {file_name} in Pinecone: {e}")
 
 def main():
-    st.title("Upload and Store Tender Data in Pinecone")
+    st.title("Upload and Store Content Data in Pinecone")
 
     uploaded_folder = st.file_uploader("Choose a folder to upload", type=["zip"], accept_multiple_files=False)
 
@@ -190,17 +159,17 @@ def main():
             if file.is_file():
                 st.write(f"Processing {file.name}...")
                 try:
-                    important_data = None
+                    content = None
                     embeddings = None
                     if file.suffix == '.txt':  # For text files
-                        important_data, embeddings = process_text_file(file)
+                        content, embeddings = process_text_file(file)
                     elif file.suffix == '.pdf':  # For PDF files
-                        important_data, embeddings = process_pdf_file(file)
+                        content, embeddings = process_pdf_file(file)
                     elif file.suffix == '.docx':  # For DOCX files
-                        important_data, embeddings = process_docx_file(file)
+                        content, embeddings = process_docx_file(file)
 
-                    if important_data and embeddings:
-                        store_in_pinecone(file.stem, important_data, embeddings)
+                    if content and embeddings:
+                        store_in_pinecone(file.stem, content, embeddings)
                     else:
                         st.warning(f"No content found in {file.name}. Skipping.")
                 except Exception as e:
