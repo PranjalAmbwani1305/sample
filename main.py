@@ -14,7 +14,6 @@ hf_token = st.secrets["huggingface"]["token"]
 
 # Initialize Pinecone instance
 pc = Pinecone(api_key=api_key, environment=env)
-index = pc.index(index_name)  # Access the index using the Pinecone instance
 
 # Initialize the model with Hugging Face, using a simpler model
 model_name = "distilbert-base-uncased"  # A smaller, easier model
