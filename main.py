@@ -7,12 +7,16 @@ import torch
 import streamlit as st
 from PyPDF2 import PdfReader
 from docx import Document
+import boto3
 
 # Load secrets from Streamlit
 api_key = st.secrets["pinecone"]["api_key"]
 env = st.secrets["pinecone"]["ENV"]
 index_name = st.secrets["pinecone"]["INDEX_NAME"]
 hf_token = st.secrets["huggingface"]["token"]
+aws_access_key_id = st.secrets["aws"]["aws_access_key_id"]
+aws_secret_access_key = st.secrets["aws"]["aws_secret_access_key"]
+bucket_name = st.secrets["aws"]["bucket_name"]
 
 # Initialize Pinecone instance
 pc = Pinecone(api_key=api_key, environment=env)
@@ -22,33 +26,27 @@ tokenizer = AutoTokenizer.from_pretrained(model_name, use_auth_token=hf_token)
 model = AutoModel.from_pretrained(model_name, use_auth_token=hf_token)
 
 # Initialize Pinecone index
-index = pc.Index(index_name)  # This is where the index is initialized
+index = pc.Index(index_name)
 
-def process_text_file(file_path):
-    """Process text files and extract embeddings with full content in metadata"""
+# Initialize AWS S3 client
+s3_client = boto3.client(
+    "s3",
+    aws_access_key_id=aws_access_key_id,
+    aws_secret_access_key=aws_secret_access_key
+)
+
+def upload_to_s3(content, file_name):
+    """Upload full content to AWS S3 and return the URL"""
     try:
-        with open(file_path, 'r', encoding="utf-8") as file:
-            content = file.read()
-
-        # Generate embeddings
-        inputs = tokenizer(content, return_tensors="pt", padding=True, truncation=True)
-        with torch.no_grad():
-            embeddings = model(**inputs).last_hidden_state.mean(dim=1).squeeze().tolist()
-
-        # Metadata includes full content of the file
-        metadata = {
-            "file_name": file_path.name,
-            "file_type": "text",
-            "content": content  # Full content of the text file
-        }
-        
-        return embeddings, metadata
+        # Store the file content in S3
+        s3_client.put_object(Body=content, Bucket=bucket_name, Key=file_name)
+        return f"https://{bucket_name}.s3.amazonaws.com/{file_name}"
     except Exception as e:
-        st.error(f"Error processing text file {file_path}: {e}")
-        return None, None
+        st.error(f"Error uploading to S3: {e}")
+        return None
 
 def process_pdf_file(file_path):
-    """Extract text from PDF and generate embeddings with full content in metadata"""
+    """Extract text from PDF and generate embeddings with preview and URL in metadata"""
     try:
         with open(file_path, 'rb') as file:
             reader = PdfReader(file)
@@ -62,13 +60,17 @@ def process_pdf_file(file_path):
             with torch.no_grad():
                 embeddings = model(**inputs).last_hidden_state.mean(dim=1).squeeze().tolist()
 
-            # Metadata includes full content of the PDF
+            # Store the content in external storage and get the URL
+            file_url = upload_to_s3(content, file_path.name)
+
+            # Metadata includes the preview and the URL to the full content
             metadata = {
                 "file_name": file_path.name,
                 "file_type": "pdf",
-                "content": content  # Full content of the PDF
+                "content_preview": content[:200],  # Only the preview of the content
+                "file_url": file_url  # URL to the full content stored externally
             }
-            
+
             return embeddings, metadata
         else:
             return None, None
@@ -76,63 +78,21 @@ def process_pdf_file(file_path):
         st.error(f"Error processing PDF file {file_path}: {e}")
         return None, None
 
-def process_docx_file(file_path):
-    """Extract text from DOCX and generate embeddings with full content in metadata"""
-    try:
-        doc = Document(file_path)
-        content = ''
-        for para in doc.paragraphs:
-            content += para.text
-
-        if content.strip():  # If there's text content in the DOCX
-            # Generate embeddings
-            inputs = tokenizer(content, return_tensors="pt", padding=True, truncation=True)
-            with torch.no_grad():
-                embeddings = model(**inputs).last_hidden_state.mean(dim=1).squeeze().tolist()
-
-            # Metadata includes full content of the DOCX
-            metadata = {
-                "file_name": file_path.name,
-                "file_type": "docx",
-                "content": content  # Full content of the DOCX
-            }
-            
-            return embeddings, metadata
-        else:
-            return None, None
-    except Exception as e:
-        st.error(f"Error processing DOCX file {file_path}: {e}")
-        return None, None
-
 def store_in_pinecone(file_name, file_content, metadata):
-    """Store the embeddings and full content in Pinecone"""
+    """Store the embeddings and metadata (with preview and file URL) in Pinecone"""
     try:
         if file_content:
             vector = file_content
             if len(vector) == 768:  # Ensure correct embedding dimension
-                # Storing both vector and metadata (including full content) in Pinecone
+                # Storing both vector and metadata (including preview and URL) in Pinecone
                 index.upsert([(file_name, vector, metadata)])
-                st.write(f"Stored {file_name} with full content in Pinecone.")
+                st.write(f"Stored {file_name} with preview and URL in Pinecone.")
             else:
                 st.error(f"Invalid vector dimension for {file_name}. Expected 768, got {len(vector)}.")
         else:
             st.warning(f"No content to store for {file_name}. Skipping.")
     except Exception as e:
         st.error(f"Error storing {file_name} in Pinecone: {e}")
-
-def query_pinecone(query_vector):
-    """Query Pinecone and display results"""
-    try:
-        result = index.query(queries=[query_vector], top_k=5)
-        if result.matches:
-            for match in result.matches:
-                st.write(f"ID: {match.id}")
-                st.write(f"Score: {match.score}")
-                st.write(f"Metadata: {match.metadata}")  # Showing full metadata with content
-        else:
-            st.warning("No matches found in Pinecone.")
-    except Exception as e:
-        st.error(f"Error querying Pinecone: {e}")
 
 def main():
     """Main function to handle file upload and processing"""
@@ -164,12 +124,8 @@ def main():
                 try:
                     file_content = None
                     metadata = None
-                    if file.suffix == '.txt':  # For text files
-                        file_content, metadata = process_text_file(file)
-                    elif file.suffix == '.pdf':  # For PDF files
+                    if file.suffix == '.pdf':  # For PDF files
                         file_content, metadata = process_pdf_file(file)
-                    elif file.suffix == '.docx':  # For DOCX files
-                        file_content, metadata = process_docx_file(file)
 
                     if file_content:
                         store_in_pinecone(file.stem, file_content, metadata)
