@@ -1,6 +1,7 @@
-streamlit
-python-dotenv
-shutil
-transformer
-torch
 pinecone-client==2.0.0
+torch
+transformers
+streamlit
+shutil
+pandas
+numpy
