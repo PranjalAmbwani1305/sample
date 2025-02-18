@@ -37,6 +37,7 @@ def read_file(file_path):
             doc = docx.Document(file_path)
             return "\n".join([para.text for para in doc.paragraphs])
         else:
+            st.warning(f"Unsupported file type: {file_path.suffix}")
             return None
     except Exception as e:
         st.error(f"Error reading {file_path.name}: {e}")
@@ -67,7 +68,12 @@ def main():
         with open(save_path / uploaded_folder.name, "wb") as f:
             f.write(uploaded_folder.getvalue())
 
-        shutil.unpack_archive(save_path / uploaded_folder.name, save_path)
+        try:
+            shutil.unpack_archive(save_path / uploaded_folder.name, save_path)
+        except Exception as e:
+            st.error(f"Error extracting ZIP file: {e}")
+            return
+
         st.write(f"Folder extracted to {save_path}. Processing files...")
 
         for file in Path(save_path).rglob("*.*"):
