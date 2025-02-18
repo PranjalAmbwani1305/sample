@@ -4,3 +4,4 @@ torch==2.2.0
 transformers
 pymupdf
 python-docx
+PyPDF2
