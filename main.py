@@ -52,6 +52,13 @@ def extract_important_data(content):
 
     return important_data
 
+def generate_embeddings(text):
+    """Generate embeddings for the important data text using Hugging Face model."""
+    inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True, max_length=512)
+    with torch.no_grad():
+        embeddings = model(**inputs).last_hidden_state.mean(dim=1)  # Use mean of token embeddings
+    return embeddings.squeeze().numpy()  # Convert to numpy array for Pinecone
+
 def process_text_file(file_path):
     """Process text files and extract important data."""
     try:
@@ -63,7 +70,6 @@ def process_text_file(file_path):
             return None
 
         important_data = extract_important_data(content)
-        
         return important_data
     except Exception as e:
         st.error(f"Error processing text file {file_path}: {e}")
@@ -83,7 +89,6 @@ def process_pdf_file(file_path):
             return None
 
         important_data = extract_important_data(content)
-
         return important_data
     except Exception as e:
         st.error(f"Error processing PDF file {file_path}: {e}")
@@ -102,7 +107,6 @@ def process_docx_file(file_path):
             return None
 
         important_data = extract_important_data(content)
-
         return important_data
     except Exception as e:
         st.error(f"Error processing DOCX file {file_path}: {e}")
@@ -115,15 +119,19 @@ def store_in_pinecone(file_name, important_data):
             # Convert important data dictionary to JSON string
             important_data_str = json.dumps(important_data)
 
+            # Generate embeddings for important data
+            embeddings = generate_embeddings(important_data_str)
+
             metadata = {
                 "file_name": file_name,
                 "file_type": "unknown",  # You can customize this if needed
                 "important_data": important_data_str  # Store as a JSON string
             }
 
-            # Store metadata and embeddings (if available) in Pinecone
+            # Store metadata and embeddings (required by Pinecone)
             index = pc.Index(index_name)
-            index.upsert([(file_name, [], metadata)])  # Empty vector as we're storing important data
+            index.upsert([(file_name, embeddings.tolist(), metadata)])  # Upsert with correct vector
+
             st.write(f"Stored {file_name} in Pinecone with important data.")
         else:
             st.warning(f"No important data found for {file_name}. Skipping.")
