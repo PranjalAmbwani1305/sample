@@ -25,22 +25,21 @@ model = AutoModel.from_pretrained(model_name, use_auth_token=hf_token)
 index = pc.Index(index_name)  # This is where the index is initialized
 
 def process_text_file(file_path):
-    """Process text files and extract embeddings and metadata"""
+    """Process text files and extract embeddings with full content in metadata"""
     try:
         with open(file_path, 'r', encoding="utf-8") as file:
             content = file.read()
 
+        # Generate embeddings
         inputs = tokenizer(content, return_tensors="pt", padding=True, truncation=True)
         with torch.no_grad():
             embeddings = model(**inputs).last_hidden_state.mean(dim=1).squeeze().tolist()
 
-        # Example metadata for text files
+        # Metadata includes full content of the file
         metadata = {
             "file_name": file_path.name,
             "file_type": "text",
-            "introduction": "This is the introduction section of the document.",  # Example metadata
-            "scope_of_work": "The scope of work involves analyzing and processing data.",  # Example metadata
-            "content_preview": content[:200]  # Preview of the content
+            "content": content  # Full content of the text file
         }
         
         return embeddings, metadata
@@ -49,7 +48,7 @@ def process_text_file(file_path):
         return None, None
 
 def process_pdf_file(file_path):
-    """Extract text from PDF and generate embeddings with metadata"""
+    """Extract text from PDF and generate embeddings with full content in metadata"""
     try:
         with open(file_path, 'rb') as file:
             reader = PdfReader(file)
@@ -58,17 +57,16 @@ def process_pdf_file(file_path):
                 content += page.extract_text()
 
         if content.strip():  # If there's text content in the PDF
+            # Generate embeddings
             inputs = tokenizer(content, return_tensors="pt", padding=True, truncation=True)
             with torch.no_grad():
                 embeddings = model(**inputs).last_hidden_state.mean(dim=1).squeeze().tolist()
 
-            # Example metadata for PDF files
+            # Metadata includes full content of the PDF
             metadata = {
                 "file_name": file_path.name,
                 "file_type": "pdf",
-                "introduction": "This document provides an overview of the tender process.",  # Example metadata
-                "scope_of_work": "The scope includes the analysis and processing of tender data.",  # Example metadata
-                "content_preview": content[:200]  # Preview of the content
+                "content": content  # Full content of the PDF
             }
             
             return embeddings, metadata
@@ -79,7 +77,7 @@ def process_pdf_file(file_path):
         return None, None
 
 def process_docx_file(file_path):
-    """Extract text from DOCX and generate embeddings with metadata"""
+    """Extract text from DOCX and generate embeddings with full content in metadata"""
     try:
         doc = Document(file_path)
         content = ''
@@ -87,17 +85,16 @@ def process_docx_file(file_path):
             content += para.text
 
         if content.strip():  # If there's text content in the DOCX
+            # Generate embeddings
             inputs = tokenizer(content, return_tensors="pt", padding=True, truncation=True)
             with torch.no_grad():
                 embeddings = model(**inputs).last_hidden_state.mean(dim=1).squeeze().tolist()
 
-            # Example metadata for DOCX files
+            # Metadata includes full content of the DOCX
             metadata = {
                 "file_name": file_path.name,
                 "file_type": "docx",
-                "introduction": "This document contains tender housekeeping details.",  # Example metadata
-                "scope_of_work": "The scope of work described in the tender includes housekeeping services.",  # Example metadata
-                "content_preview": content[:200]  # Preview of the content
+                "content": content  # Full content of the DOCX
             }
             
             return embeddings, metadata
@@ -108,14 +105,14 @@ def process_docx_file(file_path):
         return None, None
 
 def store_in_pinecone(file_name, file_content, metadata):
-    """Store the embeddings and metadata in Pinecone"""
+    """Store the embeddings and full content in Pinecone"""
     try:
         if file_content:
             vector = file_content
             if len(vector) == 768:  # Ensure correct embedding dimension
-                # Storing both vector and metadata in Pinecone
+                # Storing both vector and metadata (including full content) in Pinecone
                 index.upsert([(file_name, vector, metadata)])
-                st.write(f"Stored {file_name} with metadata in Pinecone.")
+                st.write(f"Stored {file_name} with full content in Pinecone.")
             else:
                 st.error(f"Invalid vector dimension for {file_name}. Expected 768, got {len(vector)}.")
         else:
@@ -131,7 +128,7 @@ def query_pinecone(query_vector):
             for match in result.matches:
                 st.write(f"ID: {match.id}")
                 st.write(f"Score: {match.score}")
-                st.write(f"Metadata: {match.metadata}")  # Showing full metadata
+                st.write(f"Metadata: {match.metadata}")  # Showing full metadata with content
         else:
             st.warning("No matches found in Pinecone.")
     except Exception as e:
