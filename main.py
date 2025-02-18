@@ -76,8 +76,8 @@ def process_docx_file(file_path):
         st.error(f"Error processing DOCX file {file_path}: {e}")
         return None, None
 
-def store_in_pinecone(file_name, file_content, embeddings):
-    """Store the embeddings in Pinecone with truncated content"""
+def store_in_pinecone(file_name, file_content, embeddings, file_type):
+    """Store the embeddings in Pinecone with all fields"""
     try:
         if file_content and embeddings:
             # Truncate content to avoid metadata size limit issues
@@ -88,8 +88,9 @@ def store_in_pinecone(file_name, file_content, embeddings):
                 index = pc.Index(index_name)
                 metadata = {
                     "file_name": file_name,
-                    "file_type": "pdf" if file_name.endswith(".pdf") else "docx" if file_name.endswith(".docx") else "txt",
-                    "content": truncated_content  # Store only a truncated portion
+                    "file_type": file_type,
+                    "content_preview": truncated_content,  # Store truncated content preview
+                    "full_content": file_content  # Full content to be stored in metadata
                 }
                 index.upsert([(file_name, vector, metadata)])
                 st.write(f"Stored {file_name} in Pinecone.")
@@ -131,15 +132,19 @@ def main():
                 try:
                     file_content = None
                     embeddings = None
+                    file_type = None
                     if file.suffix == '.txt':  # For text files
                         file_content, embeddings = process_text_file(file)
+                        file_type = 'text'
                     elif file.suffix == '.pdf':  # For PDF files
                         file_content, embeddings = process_pdf_file(file)
+                        file_type = 'pdf'
                     elif file.suffix == '.docx':  # For DOCX files
                         file_content, embeddings = process_docx_file(file)
+                        file_type = 'docx'
 
                     if file_content and embeddings:
-                        store_in_pinecone(file.stem, file_content, embeddings)
+                        store_in_pinecone(file.stem, file_content, embeddings, file_type)
                     else:
                         st.warning(f"No text found in {file.name}. Skipping.")
                 except Exception as e:
