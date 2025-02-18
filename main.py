@@ -1,6 +1,5 @@
 import os
 import streamlit as st
-import pinecone
 from pinecone import Pinecone as PineconeClient
 import shutil
 from pathlib import Path
