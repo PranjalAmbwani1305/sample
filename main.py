@@ -17,6 +17,8 @@ hf_token = st.secrets["huggingface"]["token"]
 # Initialize Pinecone instance
 pc = Pinecone(api_key=api_key, environment=env)
 
+# Ensure the index exists in Pinecone
+index = pc.index(index_name)  # Use your Pinecone index name
 
 model_name = "distilbert-base-uncased"  # A smaller, easier model
 tokenizer = AutoTokenizer.from_pretrained(model_name, use_auth_token=hf_token)
