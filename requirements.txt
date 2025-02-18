@@ -4,3 +4,5 @@ transformers
 streamlit
 pandas
 numpy
+shutil
+pathlib
