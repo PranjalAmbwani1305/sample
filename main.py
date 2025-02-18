@@ -8,6 +8,8 @@ import torch
 
 # Initialize Pinecone using the API key stored in Streamlit secrets
 api_key = st.secrets["pinecone"]["api_key"]
+env = st.secrets["pinecone"]["ENV"]
+index_name = st.secrets["pinecone"]["INDEX_NAME"]
 
 # Initialize Pinecone
 pinecone.init(api_key=api_key)
