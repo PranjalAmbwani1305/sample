@@ -1,6 +1,6 @@
 import os
 import streamlit as st
-from pinecone import Pinecone as PineconeClient
+import pinecone
 import shutil
 from pathlib import Path
 from transformers import AutoTokenizer, AutoModel
@@ -14,7 +14,7 @@ pinecone.init(api_key=api_key)
 
 # Index setup
 index_name = "tender_data"
-dimension = 348  # You can adjust this depending on the type of data you're storing
+dimension = 768  # Adjust based on your model output size
 
 # Create the index if it doesn't exist
 if index_name not in pinecone.list_indexes():
@@ -22,13 +22,13 @@ if index_name not in pinecone.list_indexes():
 
 index = pinecone.Index(index_name)
 
-# Load the tokenizer and model for vectorization
-model_name = "bert-base-uncased"
+# Load the Mixtral model and tokenizer for text embedding
+model_name = "huggingface/Mixtral"  # Replace with the exact Mixtral model name from Hugging Face
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModel.from_pretrained(model_name)
 
 def process_file(file_path):
-    """Process file content into embeddings (vectorized format)."""
+    """Process file content into embeddings using Mixtral model."""
     with open(file_path, 'r') as file:
         content = file.read()
 
