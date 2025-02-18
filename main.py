@@ -10,6 +10,7 @@ from PyPDF2 import PdfReader
 from docx import Document
 import uuid
 import re
+import numpy
 
 # Initialize Pinecone instance
 api_key = st.secrets["pinecone"]["api_key"]
