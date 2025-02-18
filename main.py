@@ -6,12 +6,12 @@ from pathlib import Path
 from transformers import AutoTokenizer, AutoModel
 import torch
 
-os.environ["PINECONE_API_KEY"] = st.secrets["pinecone"]["api_key"]
-
-pinecone.init()
-
+api_key = st.secrets["pinecone"]["api_key"]
+env = st.secrets["pinecone"]["ENV"]
 index_name = st.secrets["pinecone"]["INDEX_NAME"]
-index = pinecone.Index(index_name)
+
+pc = pinecone.Pinecone(api_key=api_key)
+index = pc.Index(index_name)
 
 model_name = "huggingface/Mixtral"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
