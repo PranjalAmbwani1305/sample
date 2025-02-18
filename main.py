@@ -29,7 +29,7 @@ model = AutoModel.from_pretrained(model_name, use_auth_token=hf_token)
 os.makedirs(storage_folder, exist_ok=True)
 
 def extract_project_details(content):
-    """Extract structured project details from content"""
+    """Extract structured project details from content using regex."""
     project_details = {
         "Project Title": None,
         "Project Location": None,
@@ -40,6 +40,7 @@ def extract_project_details(content):
         "Project Description": None
     }
 
+    # Use regular expressions to find fields like "Project Title", "Location", etc.
     project_details["Project Title"] = re.search(r"Project Title[:\*]?\s*(.*)", content)
     project_details["Project Location"] = re.search(r"Project Location[:\*]?\s*(.*)", content)
     project_details["Project Duration"] = re.search(r"Project Duration[:\*]?\s*(.*)", content)
@@ -53,13 +54,18 @@ def extract_project_details(content):
         if project_details[key]:
             project_details[key] = project_details[key].group(1).strip()
 
-    return project_details
+    # Return project details with None replaced with 'Not Available'
+    return {key: (value if value else "Not Available") for key, value in project_details.items()}
 
 def process_text_file(file_path):
     """Process text files and extract embeddings"""
     try:
         with open(file_path, 'r', encoding="utf-8") as file:
             content = file.read()
+
+        # If content is empty, return empty details and skip
+        if not content.strip():
+            return None, None
 
         project_details = extract_project_details(content)
         inputs = tokenizer(content, return_tensors="pt", padding=True, truncation=True)
@@ -80,15 +86,17 @@ def process_pdf_file(file_path):
             for page in reader.pages:
                 content += page.extract_text()
 
+        # If content is empty, return empty details and skip
+        if not content.strip():
+            return None, None
+
         project_details = extract_project_details(content)
 
-        if content.strip():
-            inputs = tokenizer(content, return_tensors="pt", padding=True, truncation=True)
-            with torch.no_grad():
-                embeddings = model(**inputs).last_hidden_state.mean(dim=1).squeeze().tolist()
-            return project_details, embeddings
-        else:
-            return None, None
+        inputs = tokenizer(content, return_tensors="pt", padding=True, truncation=True)
+        with torch.no_grad():
+            embeddings = model(**inputs).last_hidden_state.mean(dim=1).squeeze().tolist()
+
+        return project_details, embeddings
     except Exception as e:
         st.error(f"Error processing PDF file {file_path}: {e}")
         return None, None
@@ -101,15 +109,17 @@ def process_docx_file(file_path):
         for para in doc.paragraphs:
             content += para.text
 
+        # If content is empty, return empty details and skip
+        if not content.strip():
+            return None, None
+
         project_details = extract_project_details(content)
 
-        if content.strip():
-            inputs = tokenizer(content, return_tensors="pt", padding=True, truncation=True)
-            with torch.no_grad():
-                embeddings = model(**inputs).last_hidden_state.mean(dim=1).squeeze().tolist()
-            return project_details, embeddings
-        else:
-            return None, None
+        inputs = tokenizer(content, return_tensors="pt", padding=True, truncation=True)
+        with torch.no_grad():
+            embeddings = model(**inputs).last_hidden_state.mean(dim=1).squeeze().tolist()
+
+        return project_details, embeddings
     except Exception as e:
         st.error(f"Error processing DOCX file {file_path}: {e}")
         return None, None
