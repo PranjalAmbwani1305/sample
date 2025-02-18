@@ -1,93 +1,74 @@
 import os
-import streamlit as st
-import pinecone
-import shutil
-from pathlib import Path
+from pinecone import Pinecone, ServerlessSpec
 from transformers import AutoTokenizer, AutoModel
 import torch
-import fitz
-import docx
+import streamlit as st
 
+# Load secrets from Streamlit
 api_key = st.secrets["pinecone"]["api_key"]
 env = st.secrets["pinecone"]["ENV"]
 index_name = st.secrets["pinecone"]["INDEX_NAME"]
 hf_token = st.secrets["huggingface"]["token"]
 
-pinecone.init(api_key=api_key, environment=env)
-index = pinecone.Index(index_name)
+# Initialize Pinecone client with environment and API key
+pc = Pinecone(api_key=api_key, environment=env)
 
-model_name = "mistralai/Mixtral-8x7B"
+# Initialize the model with Hugging Face, using a simpler model
+model_name = "distilbert-base-uncased"  # A smaller, easier model
+tokenizer = AutoTokenizer.from_pretrained(model_name, use_auth_token=hf_token)
+model = AutoModel.from_pretrained(model_name, use_auth_token=hf_token)
 
-try:
-    tokenizer = AutoTokenizer.from_pretrained(model_name, use_auth_token=hf_token)
-    model = AutoModel.from_pretrained(model_name, use_auth_token=hf_token)
-    st.success("Model loaded successfully!")
-except Exception as e:
-    st.error(f"Error loading model: {e}")
+def process_file(file_path):
+    """Process the file and extract embeddings"""
+    with open(file_path, 'r', encoding="utf-8") as file:
+        content = file.read()
 
-def read_file(file_path):
-    try:
-        if file_path.suffix.lower() == ".txt":
-            with open(file_path, "r", encoding="utf-8") as file:
-                return file.read()
-        elif file_path.suffix.lower() == ".pdf":
-            doc = fitz.open(str(file_path))
-            return "\n".join([page.get_text("text") for page in doc])
-        elif file_path.suffix.lower() == ".docx":
-            doc = docx.Document(file_path)
-            return "\n".join([para.text for para in doc.paragraphs])
-        else:
-            st.warning(f"Unsupported file type: {file_path.suffix}")
-            return None
-    except Exception as e:
-        st.error(f"Error reading {file_path.name}: {e}")
-        return None
-
-def process_text(text):
-    inputs = tokenizer(text, return_tensors="pt", padding=True, truncation=True)
+    inputs = tokenizer(content, return_tensors="pt", padding=True, truncation=True)
     with torch.no_grad():
         embeddings = model(**inputs).last_hidden_state.mean(dim=1).squeeze().tolist()
+
     return embeddings
 
 def store_in_pinecone(file_name, file_content):
+    """Store the embeddings in Pinecone"""
     vector = file_content
-    index.upsert([(file_name, vector)])
+    pc.index(index_name).upsert([(file_name, vector)])
 
 def main():
-    st.title("Tender Bot - Upload & Process Documents")
+    st.title("Folder Upload and Pinecone Storage")
 
-    uploaded_folder = st.file_uploader("Upload a ZIP folder containing tenders", type=["zip"])
+    uploaded_folder = st.file_uploader("Choose a folder to upload", type=["zip"], accept_multiple_files=False)
 
     if uploaded_folder is not None:
         save_path = Path("local_upload_folder")
-
+        
         if save_path.exists():
             shutil.rmtree(save_path)
         save_path.mkdir(parents=True, exist_ok=True)
 
+        # Save the uploaded zip folder
         with open(save_path / uploaded_folder.name, "wb") as f:
             f.write(uploaded_folder.getvalue())
-
+        
+        # Unzip the uploaded folder
         try:
             shutil.unpack_archive(save_path / uploaded_folder.name, save_path)
+            st.write(f"Folder uploaded and unzipped to {save_path}. Processing files...")
         except Exception as e:
             st.error(f"Error extracting ZIP file: {e}")
             return
 
-        st.write(f"Folder extracted to {save_path}. Processing files...")
-
-        for file in Path(save_path).rglob("*.*"):
+        # Process each file in the folder
+        for file in Path(save_path).rglob('*.*'):
             if file.is_file():
-                text_content = read_file(file)
-                if text_content:
-                    try:
-                        st.write(f"Processing {file.name}...")
-                        embeddings = process_text(text_content)
-                        store_in_pinecone(file.stem, embeddings)
-                    except Exception as e:
-                        st.error(f"Error processing {file.name}: {e}")
+                st.write(f"Processing {file.name}...")
+                try:
+                    file_content = process_file(file)
+                    store_in_pinecone(file.stem, file_content)
+                except Exception as e:
+                    st.error(f"Error processing {file.name}: {e}")
 
-        st.success("All valid files processed and stored in Pinecone.")
+        st.success("Folder contents stored in Pinecone.")
 
 if __name__ == "__main__":
     main()
