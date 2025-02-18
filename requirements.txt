@@ -1,4 +1,6 @@
 streamlit
 python-dotenv
 shutil
+transformer
+torch
 pinecone-client==2.0.0
