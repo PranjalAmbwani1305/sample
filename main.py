@@ -1,98 +1,107 @@
 import os
 import shutil
 from pathlib import Path
-from pinecone import Pinecone
+from pinecone import Pinecone, ServerlessSpec
 from transformers import AutoTokenizer, AutoModel
 import torch
 import streamlit as st
 from PyPDF2 import PdfReader
 from docx import Document
 
-# Load secrets from Streamlit
 api_key = st.secrets["pinecone"]["api_key"]
 env = st.secrets["pinecone"]["ENV"]
 index_name = st.secrets["pinecone"]["INDEX_NAME"]
 hf_token = st.secrets["huggingface"]["token"]
 
-# Initialize Pinecone instance
 pc = Pinecone(api_key=api_key, environment=env)
 
-# Access the Pinecone index
-index = pc.Index(index_name)  # Access the Pinecone index
-
-model_name = "distilbert-base-uncased"  # A smaller, easier model
+model_name = "distilbert-base-uncased"
 tokenizer = AutoTokenizer.from_pretrained(model_name, use_auth_token=hf_token)
 model = AutoModel.from_pretrained(model_name, use_auth_token=hf_token)
 
 def process_text_file(file_path):
-    """Process text files and extract embeddings"""
     try:
         with open(file_path, 'r', encoding="utf-8") as file:
             content = file.read()
-
         inputs = tokenizer(content, return_tensors="pt", padding=True, truncation=True)
         with torch.no_grad():
             embeddings = model(**inputs).last_hidden_state.mean(dim=1).squeeze().tolist()
-
         return embeddings
     except Exception as e:
         st.error(f"Error processing text file {file_path}: {e}")
         return None
 
 def process_pdf_file(file_path):
-    """Extract text from PDF and generate embeddings"""
     try:
         with open(file_path, 'rb') as file:
             reader = PdfReader(file)
             content = ''
             for page in reader.pages:
                 content += page.extract_text()
-        
-        if content.strip():  # If there's any text content in the PDF
+        if content.strip():
             inputs = tokenizer(content, return_tensors="pt", padding=True, truncation=True)
             with torch.no_grad():
                 embeddings = model(**inputs).last_hidden_state.mean(dim=1).squeeze().tolist()
-            return embeddings
+            metadata = {
+                "file_name": file_path.name,
+                "file_type": "pdf",
+                "content_preview": content[:200]
+            }
+            return embeddings, metadata
         else:
-            return None
+            return None, None
     except Exception as e:
         st.error(f"Error processing PDF file {file_path}: {e}")
-        return None
+        return None, None
 
 def process_docx_file(file_path):
-    """Extract text from DOCX and generate embeddings"""
     try:
         doc = Document(file_path)
         content = ''
         for para in doc.paragraphs:
             content += para.text
-
-        if content.strip():  # If there's any text content in the DOCX
+        if content.strip():
             inputs = tokenizer(content, return_tensors="pt", padding=True, truncation=True)
             with torch.no_grad():
                 embeddings = model(**inputs).last_hidden_state.mean(dim=1).squeeze().tolist()
-            return embeddings
+            metadata = {
+                "file_name": file_path.name,
+                "file_type": "docx",
+                "content_preview": content[:200]
+            }
+            return embeddings, metadata
         else:
-            return None
+            return None, None
     except Exception as e:
         st.error(f"Error processing DOCX file {file_path}: {e}")
-        return None
+        return None, None
 
-def store_in_pinecone(file_name, file_content):
-    """Store the embeddings in Pinecone"""
+def store_in_pinecone(file_name, file_content, metadata):
     try:
         if file_content:
             vector = file_content
-            # Ensure the vector is of the correct dimension (based on your model output)
-            if len(vector) == 768:  # For distilbert-base-uncased, the output dimension is 768
-                index.upsert([(file_name, vector)])  # Store the vector in Pinecone index
-                st.write(f"Stored {file_name} in Pinecone.")
+            if len(vector) == 768:
+                index.upsert([(file_name, vector, metadata)])
+                st.write(f"Stored {file_name} with metadata in Pinecone.")
             else:
                 st.error(f"Invalid vector dimension for {file_name}. Expected 768, got {len(vector)}.")
         else:
             st.warning(f"No content to store for {file_name}. Skipping.")
     except Exception as e:
         st.error(f"Error storing {file_name} in Pinecone: {e}")
+
+def query_pinecone(query_vector):
+    try:
+        result = index.query(queries=[query_vector], top_k=5)
+        if result.matches:
+            for match in result.matches:
+                st.write(f"ID: {match.id}")
+                st.write(f"Score: {match.score}")
+                st.write(f"Metadata: {match.metadata}")
+        else:
+            st.warning("No matches found in Pinecone.")
+    except Exception as e:
+        st.error(f"Error querying Pinecone: {e}")
 
 def main():
     st.title("Folder Upload and Pinecone Storage")
@@ -103,14 +112,12 @@ def main():
         save_path = Path("local_upload_folder")
         
         if save_path.exists():
-            shutil.rmtree(save_path)  # Clean up existing folder
+            shutil.rmtree(save_path)
         save_path.mkdir(parents=True, exist_ok=True)
 
-        # Save the uploaded zip folder
         with open(save_path / uploaded_folder.name, "wb") as f:
             f.write(uploaded_folder.getvalue())
         
-        # Unzip the uploaded folder
         try:
             shutil.unpack_archive(save_path / uploaded_folder.name, save_path)
             st.write(f"Folder uploaded and unzipped to {save_path}. Processing files...")
@@ -118,21 +125,21 @@ def main():
             st.error(f"Error extracting ZIP file: {e}")
             return
 
-        # Process each file in the folder
         for file in Path(save_path).rglob('*.*'):
             if file.is_file():
                 st.write(f"Processing {file.name}...")
                 try:
                     file_content = None
-                    if file.suffix == '.txt':  # For text files
-                        file_content = process_text_file(file)
-                    elif file.suffix == '.pdf':  # For PDF files
-                        file_content = process_pdf_file(file)
-                    elif file.suffix == '.docx':  # For DOCX files
-                        file_content = process_docx_file(file)
+                    metadata = None
+                    if file.suffix == '.txt':
+                        file_content, metadata = process_text_file(file)
+                    elif file.suffix == '.pdf':
+                        file_content, metadata = process_pdf_file(file)
+                    elif file.suffix == '.docx':
+                        file_content, metadata = process_docx_file(file)
 
                     if file_content:
-                        store_in_pinecone(file.stem, file_content)
+                        store_in_pinecone(file.stem, file_content, metadata)
                     else:
                         st.warning(f"No text found in {file.name}. Skipping.")
                 except Exception as e:
