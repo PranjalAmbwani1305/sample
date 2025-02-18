@@ -28,10 +28,10 @@ def process_text_file(file_path):
         with torch.no_grad():
             embeddings = model(**inputs).last_hidden_state.mean(dim=1).squeeze().tolist()
 
-        return embeddings
+        return content, embeddings
     except Exception as e:
         st.error(f"Error processing text file {file_path}: {e}")
-        return None
+        return None, None
 
 def process_pdf_file(file_path):
     try:
@@ -40,17 +40,17 @@ def process_pdf_file(file_path):
             content = ''
             for page in reader.pages:
                 content += page.extract_text()
-        
+
         if content.strip():
             inputs = tokenizer(content, return_tensors="pt", padding=True, truncation=True)
             with torch.no_grad():
                 embeddings = model(**inputs).last_hidden_state.mean(dim=1).squeeze().tolist()
-            return embeddings
+            return content, embeddings
         else:
-            return None
+            return None, None
     except Exception as e:
         st.error(f"Error processing PDF file {file_path}: {e}")
-        return None
+        return None, None
 
 def process_docx_file(file_path):
     try:
@@ -63,20 +63,25 @@ def process_docx_file(file_path):
             inputs = tokenizer(content, return_tensors="pt", padding=True, truncation=True)
             with torch.no_grad():
                 embeddings = model(**inputs).last_hidden_state.mean(dim=1).squeeze().tolist()
-            return embeddings
+            return content, embeddings
         else:
-            return None
+            return None, None
     except Exception as e:
         st.error(f"Error processing DOCX file {file_path}: {e}")
-        return None
+        return None, None
 
-def store_in_pinecone(file_name, file_content):
+def store_in_pinecone(file_name, file_content, embeddings):
     try:
-        if file_content:
-            vector = file_content
+        if file_content and embeddings:
+            vector = embeddings
             if len(vector) == 768:
                 index = pc.Index(index_name)
-                index.upsert([(file_name, vector)])
+                metadata = {
+                    "file_name": file_name,
+                    "file_type": "pdf" if file_name.endswith(".pdf") else "docx" if file_name.endswith(".docx") else "txt",
+                    "content": file_content  # Store the full content here
+                }
+                index.upsert([(file_name, vector, metadata)])
                 st.write(f"Stored {file_name} in Pinecone.")
             else:
                 st.error(f"Invalid vector dimension for {file_name}. Expected 768, got {len(vector)}.")
@@ -112,15 +117,16 @@ def main():
                 st.write(f"Processing {file.name}...")
                 try:
                     file_content = None
+                    embeddings = None
                     if file.suffix == '.txt':
-                        file_content = process_text_file(file)
+                        file_content, embeddings = process_text_file(file)
                     elif file.suffix == '.pdf':
-                        file_content = process_pdf_file(file)
+                        file_content, embeddings = process_pdf_file(file)
                     elif file.suffix == '.docx':
-                        file_content = process_docx_file(file)
+                        file_content, embeddings = process_docx_file(file)
 
-                    if file_content:
-                        store_in_pinecone(file.stem, file_content)
+                    if file_content and embeddings:
+                        store_in_pinecone(file.stem, file_content, embeddings)
                     else:
                         st.warning(f"No text found in {file.name}. Skipping.")
                 except Exception as e:
