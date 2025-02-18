@@ -5,20 +5,17 @@ import shutil
 from pathlib import Path
 from transformers import AutoTokenizer, AutoModel
 import torch
-import fitz  # PyMuPDF for PDF reading
-import docx  # For DOCX reading
+import fitz
+import docx
 
-# Load API keys from Streamlit secrets
 api_key = st.secrets["pinecone"]["api_key"]
 env = st.secrets["pinecone"]["ENV"]
 index_name = st.secrets["pinecone"]["INDEX_NAME"]
 hf_token = st.secrets["huggingface"]["token"]
 
-# Initialize Pinecone
 pinecone.init(api_key=api_key, environment=env)
 index = pinecone.Index(index_name)
 
-# Load Hugging Face model with authentication
 model_name = "mistralai/Mixtral-8x7B"
 
 try:
@@ -28,9 +25,7 @@ try:
 except Exception as e:
     st.error(f"Error loading model: {e}")
 
-# Function to read different file types
 def read_file(file_path):
-    """Reads file content based on its type (TXT, PDF, DOCX)."""
     try:
         if file_path.suffix.lower() == ".txt":
             with open(file_path, "r", encoding="utf-8") as file:
@@ -42,24 +37,21 @@ def read_file(file_path):
             doc = docx.Document(file_path)
             return "\n".join([para.text for para in doc.paragraphs])
         else:
-            return None  # Skip unsupported files
+            return None
     except Exception as e:
         st.error(f"Error reading {file_path.name}: {e}")
         return None
 
-# Function to process text into embeddings
 def process_text(text):
     inputs = tokenizer(text, return_tensors="pt", padding=True, truncation=True)
     with torch.no_grad():
         embeddings = model(**inputs).last_hidden_state.mean(dim=1).squeeze().tolist()
     return embeddings
 
-# Function to store embeddings in Pinecone
 def store_in_pinecone(file_name, file_content):
     vector = file_content
     index.upsert([(file_name, vector)])
 
-# Streamlit App
 def main():
     st.title("Tender Bot - Upload & Process Documents")
 
@@ -69,7 +61,7 @@ def main():
         save_path = Path("local_upload_folder")
 
         if save_path.exists():
-            shutil.rmtree(save_path)  # Clear previous uploads
+            shutil.rmtree(save_path)
         save_path.mkdir(parents=True, exist_ok=True)
 
         with open(save_path / uploaded_folder.name, "wb") as f:
