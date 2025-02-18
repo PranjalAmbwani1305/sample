@@ -13,9 +13,13 @@ index_name = st.secrets["pinecone"]["INDEX_NAME"]
 pc = pinecone.Pinecone(api_key=api_key)
 index = pc.Index(index_name)
 
-model_name = "huggingface/Mixtral"
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModel.from_pretrained(model_name)
+model_name = "mistralai/Mixtral-8x7B"
+
+try:
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModel.from_pretrained(model_name)
+except Exception as e:
+    st.error(f"Error loading model: {e}")
 
 def process_file(file_path):
     with open(file_path, 'r', encoding="utf-8") as file:
