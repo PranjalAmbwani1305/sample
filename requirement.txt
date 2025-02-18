@@ -1,4 +1,5 @@
 streamlit
+pinecone
 pinecone-client
 python-dotenv
 shutil
