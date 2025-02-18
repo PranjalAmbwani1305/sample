@@ -7,12 +7,14 @@ import torch
 import streamlit as st
 from PyPDF2 import PdfReader
 from docx import Document
+import uuid
 
 # Load secrets from Streamlit
 api_key = st.secrets["pinecone"]["api_key"]
 env = st.secrets["pinecone"]["ENV"]
 index_name = st.secrets["pinecone"]["INDEX_NAME"]
 hf_token = st.secrets["huggingface"]["token"]
+storage_folder = "file_storage"  # Folder for external storage
 
 # Initialize Pinecone instance
 pc = Pinecone(api_key=api_key, environment=env)
@@ -21,6 +23,9 @@ pc = Pinecone(api_key=api_key, environment=env)
 model_name = "distilbert-base-uncased"  # A smaller, easier model
 tokenizer = AutoTokenizer.from_pretrained(model_name, use_auth_token=hf_token)
 model = AutoModel.from_pretrained(model_name, use_auth_token=hf_token)
+
+# Make sure storage folder exists
+os.makedirs(storage_folder, exist_ok=True)
 
 def process_text_file(file_path):
     """Process text files and extract embeddings"""
@@ -76,12 +81,17 @@ def process_docx_file(file_path):
         st.error(f"Error processing DOCX file {file_path}: {e}")
         return None, None
 
-def store_in_pinecone(file_name, file_content, embeddings, file_type):
-    """Store the embeddings in Pinecone with all fields"""
+def store_in_pinecone(file_name, full_content, embeddings, file_type):
+    """Store the embeddings and file metadata in Pinecone with a link to full content"""
     try:
-        if file_content and embeddings:
-            # Truncate content to avoid metadata size limit issues
-            truncated_content = file_content[:1000]  # Truncate to the first 1000 characters to reduce size
+        if full_content and embeddings:
+            # Store the full content externally in the file_storage folder
+            file_uuid = str(uuid.uuid4())  # Generate a unique identifier for the file
+            storage_path = Path(storage_folder) / f"{file_uuid}.txt"
+            with open(storage_path, 'w', encoding="utf-8") as file:
+                file.write(full_content)
+            
+            # Create metadata with a reference to the full content (external storage path)
             vector = embeddings
             
             if len(vector) == 768:
@@ -89,10 +99,10 @@ def store_in_pinecone(file_name, file_content, embeddings, file_type):
                 metadata = {
                     "file_name": file_name,
                     "file_type": file_type,
-                    "content_preview": truncated_content,  # Store truncated content preview
+                    "external_content_path": str(storage_path),  # Link to external file storage
                 }
                 index.upsert([(file_name, vector, metadata)])
-                st.write(f"Stored {file_name} in Pinecone.")
+                st.write(f"Stored {file_name} in Pinecone with external content reference.")
             else:
                 st.error(f"Invalid vector dimension for {file_name}. Expected 768, got {len(vector)}.")
         else:
