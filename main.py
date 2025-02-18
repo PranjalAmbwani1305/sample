@@ -1,7 +1,7 @@
 import os
 import shutil
 from pathlib import Path
-import pinecone
+from pinecone import Pinecone
 from transformers import AutoTokenizer, AutoModel
 import torch
 import streamlit as st
@@ -15,10 +15,10 @@ index_name = st.secrets["pinecone"]["INDEX_NAME"]
 hf_token = st.secrets["huggingface"]["token"]
 
 # Initialize Pinecone instance
-pinecone.init(api_key=api_key, environment=env)
+pc = Pinecone(api_key=api_key, environment=env)
 
-# Ensure the index exists in Pinecone
-index = pinecone.Index(index_name)  # Access the Pinecone index
+# Access the Pinecone index
+index = pc.Index(index_name)  # Access the Pinecone index
 
 model_name = "distilbert-base-uncased"  # A smaller, easier model
 tokenizer = AutoTokenizer.from_pretrained(model_name, use_auth_token=hf_token)
