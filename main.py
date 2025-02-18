@@ -6,26 +6,21 @@ from pathlib import Path
 from transformers import AutoTokenizer, AutoModel
 import torch
 
-# Initialize Pinecone using the API key stored in Streamlit secrets
-api_key = st.secrets["pinecone"]["api_key"]
-env = st.secrets["pinecone"]["ENV"]
+os.environ["PINECONE_API_KEY"] = st.secrets["pinecone"]["api_key"]
+
+pinecone.init()
+
 index_name = st.secrets["pinecone"]["INDEX_NAME"]
+index = pinecone.Index(index_name)
 
-# Initialize Pinecone
-pinecone.init(api_key=api_key)
-
-
-# Load the Mixtral model and tokenizer for text embedding
-model_name = "huggingface/Mixtral"  # Replace with the exact Mixtral model name from Hugging Face
+model_name = "huggingface/Mixtral"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModel.from_pretrained(model_name)
 
 def process_file(file_path):
-    """Process file content into embeddings using Mixtral model."""
     with open(file_path, 'r', encoding="utf-8") as file:
         content = file.read()
 
-    # Tokenize and create embeddings
     inputs = tokenizer(content, return_tensors="pt", padding=True, truncation=True)
     with torch.no_grad():
         embeddings = model(**inputs).last_hidden_state.mean(dim=1).squeeze().tolist()
@@ -33,8 +28,7 @@ def process_file(file_path):
     return embeddings
 
 def store_in_pinecone(file_name, file_content):
-    """Store the file content as a vector in Pinecone."""
-    vector = file_content  # Already a vector from the process_file function
+    vector = file_content
     index.upsert([(file_name, vector)])
 
 def main():
@@ -43,29 +37,27 @@ def main():
     uploaded_folder = st.file_uploader("Choose a folder to upload", type=["zip"], accept_multiple_files=False)
 
     if uploaded_folder is not None:
-        # Define the local save path for the folder
         save_path = Path("local_upload_folder")
         
-        # Clear previous folder if any exists
         if save_path.exists():
-            shutil.rmtree(save_path)  # Remove the old folder
+            shutil.rmtree(save_path)
         save_path.mkdir(parents=True, exist_ok=True)
 
-        # Write the uploaded zip file to the local directory
         with open(save_path / uploaded_folder.name, "wb") as f:
             f.write(uploaded_folder.getvalue())
         
-        # Unzip the file in the specified local path
         shutil.unpack_archive(save_path / uploaded_folder.name, save_path)
 
         st.write(f"Folder uploaded and unzipped to {save_path}. Processing files...")
 
-        # Process and store each file in Pinecone
         for file in Path(save_path).rglob('*.*'):
             if file.is_file():
                 st.write(f"Processing {file.name}...")
-                file_content = process_file(file)
-                store_in_pinecone(file.stem, file_content)
+                try:
+                    file_content = process_file(file)
+                    store_in_pinecone(file.stem, file_content)
+                except Exception as e:
+                    st.error(f"Error processing {file.name}: {e}")
 
         st.success("Folder contents stored in Pinecone.")
 
