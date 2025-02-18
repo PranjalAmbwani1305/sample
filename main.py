@@ -81,7 +81,7 @@ def store_in_pinecone(file_name, file_content, embeddings, file_type):
     try:
         if file_content and embeddings:
             # Truncate content to avoid metadata size limit issues
-            truncated_content = file_content[:2000]  # Truncate to the first 2000 characters
+            truncated_content = file_content[:1000]  # Truncate to the first 1000 characters to reduce size
             vector = embeddings
             
             if len(vector) == 768:
@@ -90,7 +90,6 @@ def store_in_pinecone(file_name, file_content, embeddings, file_type):
                     "file_name": file_name,
                     "file_type": file_type,
                     "content_preview": truncated_content,  # Store truncated content preview
-                    "full_content": file_content  # Full content to be stored in metadata
                 }
                 index.upsert([(file_name, vector, metadata)])
                 st.write(f"Stored {file_name} in Pinecone.")
