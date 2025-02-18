@@ -14,7 +14,7 @@ pinecone.init(api_key=api_key)
 
 # Index setup
 index_name = "tender_data"
-dimension = 768  # You can adjust this depending on the type of data you're storing
+dimension = 348  # You can adjust this depending on the type of data you're storing
 
 # Create the index if it doesn't exist
 if index_name not in pinecone.list_indexes():
