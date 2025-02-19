@@ -1,8 +1,6 @@
 streamlit
 pinecone-client
-torch==2.2.0
+langchain
+sentence-transformers
+pypdf
 transformers
-pymupdf
-python-docx
-PyPDF2
-numpy
