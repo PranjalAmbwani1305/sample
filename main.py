@@ -1,97 +1,48 @@
-import os
-import shutil
-import torch
 import streamlit as st
-from pathlib import Path
 from pinecone import Pinecone
-from transformers import AutoTokenizer, AutoModel
-from PyPDF2 import PdfReader
-import re
+import os
+from langchain.document_loaders import PyPDFLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.embeddings import HuggingFaceEmbeddings
+from langchain.vectorstores import Pinecone as LangchainPinecone
 
-api_key = st.secrets["pinecone"]["api_key"]
-env = st.secrets["pinecone"]["ENV"]
-index_name = st.secrets["pinecone"]["INDEX_NAME"]
-hf_token = st.secrets["huggingface"]["token"]
+# Load API keys from Streamlit secrets
+PINECONE_API_KEY = st.secrets["pinecone"]["api_key"]
+PINECONE_ENV = st.secrets["pinecone"]["env"]
+PINECONE_INDEX = st.secrets["pinecone"]["index_name"]
+HF_TOKEN = st.secrets["huggingface"]["token"]
 
-pc = Pinecone(api_key=api_key)
-index = pc.Index(index_name)
+# Initialize Pinecone
+pc = Pinecone(api_key=PINECONE_API_KEY)
+index = pc.Index(PINECONE_INDEX)
 
-model_name = "distilbert-base-uncased"
-tokenizer = AutoTokenizer.from_pretrained(model_name, token=hf_token)
-model = AutoModel.from_pretrained(model_name, token=hf_token)
+# Initialize Hugging Face embeddings
+embedding_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
-storage_folder = "content_storage"
-os.makedirs(storage_folder, exist_ok=True)
+def extract_text_from_pdf(uploaded_file):
+    """Extract text from a PDF using LangChain's PyPDFLoader."""
+    loader = PyPDFLoader(uploaded_file)
+    docs = loader.load()
+    return docs
 
-def extract_text_sections(text):
-    section_keywords = {
-        "Introduction": r"(?i)\bIntroduction\b",
-        "Project Detail": r"(?i)\bProject Details?\b",
-        "Delivery Detail": r"(?i)\bDelivery Details?\b",
-        "Bidding Detail": r"(?i)\bBidding Details?\b|\bTender Details?\b",
-        "Payment Detail": r"(?i)\bPayment Terms?\b|\bPayment Details?\b",
-        "Penalties Detail": r"(?i)\bPenalt(y|ies) Details?\b|\bPenalty Clause\b",
-        "Scope of Work": r"(?i)\bScope of Work\b|\bWork Description\b"
-    }
-    
-    sections = {}
-    current_section = "Uncategorized"
-    sections[current_section] = []
+def process_and_store_pdf(uploaded_file):
+    """Extract text, generate embeddings, and store in Pinecone."""
+    docs = extract_text_from_pdf(uploaded_file)
 
-    for line in text.split("\n"):
-        line = line.strip()
-        for section_name, pattern in section_keywords.items():
-            if re.search(pattern, line):
-                current_section = section_name
-                sections[current_section] = []
-                break
-        sections[current_section].append(line)
-    
-    return {k: "\n".join(v) for k, v in sections.items() if v}
+    # Split text into chunks
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    chunks = text_splitter.split_documents(docs)
 
-def extract_text_from_pdf(file_path):
-    reader = PdfReader(file_path)
-    full_text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
-    return extract_text_sections(full_text) if full_text.strip() else {}
+    # Store embeddings in Pinecone
+    vectorstore = LangchainPinecone.from_documents(chunks, embedding_model, index_name=PINECONE_INDEX)
 
-def embed_text(text):
-    inputs = tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=512)
-    with torch.no_grad():
-        return model(**inputs).last_hidden_state[:, 0, :].squeeze().tolist()
+    return len(chunks)
 
-def store_in_pinecone(file_name, structured_content):
-    for section, text in structured_content.items():
-        chunk_id = f"{file_name}_{section.replace(' ', '_')}"
-        embedding = embed_text(text)
-        metadata = {"file_name": file_name, "section": section, "text": text}
-        if len(embedding) == 768:
-            index.upsert([(chunk_id, embedding, metadata)])
-            st.write(f"✅ Stored {file_name} - {section} in Pinecone.")
-        else:
-            st.error(f"❌ Invalid vector size: Expected 768, got {len(embedding)}.")
+# Streamlit UI
+st.title("📄 PDF to Pinecone Storage")
 
-def process_folder(folder_path):
-    st.write(f"📂 Processing folder: {folder_path}")
-    for file in Path(folder_path).rglob("*.pdf"):
-        st.write(f"📄 Processing {file.name}...")
-        structured_content = extract_text_from_pdf(file)
-        if structured_content:
-            store_in_pinecone(file.name, structured_content)
-        else:
-            st.warning(f"⚠️ No structured content found in {file.name}.")
+uploaded_file = st.file_uploader("Upload a PDF", type="pdf")
 
-def main():
-    st.title("📌 Process & Store Structured PDF Data in Pinecone")
-    uploaded_zip = st.file_uploader("📁 Upload a ZIP folder containing PDFs", type=["zip"])
-    if uploaded_zip:
-        zip_path = os.path.join(storage_folder, uploaded_zip.name)
-        with open(zip_path, "wb") as f:
-            f.write(uploaded_zip.getvalue())
-        folder_extract_path = os.path.join(storage_folder, "extracted_files")
-        shutil.unpack_archive(zip_path, folder_extract_path)
-        st.write(f"📂 Folder extracted to {folder_extract_path}")
-        process_folder(folder_extract_path)
-        st.success("✅ All important structured data stored in Pinecone!")
-
-if __name__ == "__main__":
-    main()
+if uploaded_file:
+    num_chunks = process_and_store_pdf(uploaded_file)
+    st.success(f"Stored {num_chunks} chunks in Pinecone! 🚀")
