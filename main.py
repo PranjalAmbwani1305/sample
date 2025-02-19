@@ -8,7 +8,7 @@ from docx import Document
 
 # Set API keys (use Streamlit secrets for deployment)
 openai.api_key = st.secrets["OPENAI_API_KEY"]
-pinecone.init(api_key=st.secrets["PINECONE_API_KEY"], environment="your_pinecone_env")
+pinecone.init(api_key=st.secrets["PINECONE_API_KEY"], environment="us-east-1")
 index = pinecone.Index("tender")
 
 # Tokenizer for chunking
