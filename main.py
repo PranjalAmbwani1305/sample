@@ -1,105 +1,79 @@
 import streamlit as st
-import fitz  
-from sentence_transformers import SentenceTransformer
-from pinecone import Pinecone
-import os
-import numpy as np
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.schema import Document
-import time
-import re
+import openai
+import pinecone
+import tiktoken
+import uuid
+import pdfplumber
+from docx import Document
 
-# Load secrets
-PINECONE_API_KEY = st.secrets["pinecone"]["api_key"]
-PINECONE_ENV = st.secrets["pinecone"]["env"]
-PINECONE_INDEX = st.secrets["pinecone"]["index_name"]
-HF_TOKEN = st.secrets["huggingface"]["token"]
+# Set API keys (use Streamlit secrets for deployment)
+openai.api_key = st.secrets["OPENAI_API_KEY"]
+pinecone.init(api_key=st.secrets["PINECONE_API_KEY"], environment="your_pinecone_env")
+index = pinecone.Index("your_index_name")
 
-os.environ['HUGGINGFACE_API_KEY'] = HF_TOKEN
+# Tokenizer for chunking
+tokenizer = tiktoken.get_encoding("cl100k_base")
 
-# Pinecone Setup
-pc = Pinecone(api_key=PINECONE_API_KEY, environment=PINECONE_ENV)
-if PINECONE_INDEX not in pc.list_indexes().names():
-    pc.create_index(name=PINECONE_INDEX, dimension=384, metric='cosine')
-index = pc.Index(PINECONE_INDEX)
+# Function to extract text from a PDF
+def extract_text_from_pdf(file):
+    text = ""
+    with pdfplumber.open(file) as pdf:
+        for page in pdf.pages:
+            text += page.extract_text() + "\n"
+    return text
 
-# Sections to Extract
-SECTIONS = ["Introduction", "Project Details", "Bidding Process", "Scope of Work", "Payment Terms"]
+# Function to extract text from a DOCX file
+def extract_text_from_docx(file):
+    doc = Document(file)
+    return "\n".join([para.text for para in doc.paragraphs])
 
-def extract_sections(text):
-    """Extract key sections from the PDF text"""
-    extracted_data = {}
-    for i in range(len(SECTIONS) - 1):
-        start_pattern = rf"{SECTIONS[i]}"
-        end_pattern = rf"{SECTIONS[i + 1]}"
-        match = re.search(f"{start_pattern}(.*?){end_pattern}", text, re.DOTALL)
-        if match:
-            extracted_data[SECTIONS[i]] = match.group(1).strip()
-    
-    # Extract last section (Payment Terms)
-    last_section = re.search(rf"{SECTIONS[-1]}(.*)", text, re.DOTALL)
-    if last_section:
-        extracted_data[SECTIONS[-1]] = last_section.group(1).strip()
+# Function to chunk text into smaller sections
+def chunk_text(text, max_tokens=500):
+    tokens = tokenizer.encode(text)
+    chunks = [tokens[i:i+max_tokens] for i in range(0, len(tokens), max_tokens)]
+    return [" ".join(tokenizer.decode(chunk).split()) for chunk in chunks]
 
-    return extracted_data
+# Function to generate embeddings
+def generate_embedding(text):
+    response = openai.Embedding.create(input=text, model="text-embedding-ada-002")
+    return response["data"][0]["embedding"]
 
-class PDFLoader:
-    def __init__(self, pdf_file):
-        if pdf_file is None:
-            raise ValueError("PDF file is not provided.")
-        self.pdf_file = pdf_file
-        self.extracted_text = self.extract_text()
+# Streamlit UI
+st.title("File Upload & Embedding Storage in Pinecone")
 
-        # Extract structured sections
-        self.structured_data = extract_sections(self.extracted_text)
+uploaded_file = st.file_uploader("Upload a TXT, PDF, or DOCX file", type=["txt", "pdf", "docx"])
 
-        # Split text into chunks
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=100)
-        self.text_chunks = text_splitter.split_text(self.extracted_text)
+if uploaded_file is not None:
+    st.write("Processing file...")
 
-    def extract_text(self):
-        """Extract text from PDF"""
-        doc = fitz.open(stream=self.pdf_file.read(), filetype="pdf")
-        text = ""
-        for page in doc:
-            text += page.get_text("text") + "\n"
-        return text.strip()
+    # Read file content
+    if uploaded_file.type == "text/plain":
+        text = uploaded_file.getvalue().decode("utf-8")
+    elif uploaded_file.type == "application/pdf":
+        text = extract_text_from_pdf(uploaded_file)
+    elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        text = extract_text_from_docx(uploaded_file)
+    else:
+        st.error("Unsupported file format.")
+        st.stop()
 
-class EmbeddingGenerator:
-    def __init__(self, model_name='all-MiniLM-L6-v2'):
-        self.model = SentenceTransformer(model_name)
+    # Break into sections
+    sections = chunk_text(text)
 
-    def generate_embeddings(self, text_chunks):
-        return self.model.encode(text_chunks)
+    # Generate embeddings and store in Pinecone
+    for i, section in enumerate(sections):
+        embedding = generate_embedding(section)
+        doc_id = str(uuid.uuid4())  # Unique ID
+        index.upsert([(doc_id, embedding, {"text": section})])
 
-def store_embeddings(index, embeddings, metadata):
-    """Upsert embeddings into Pinecone"""
-    upsert_data = [{"id": f'doc-{i}', "values": embeddings[i].tolist(), "metadata": metadata[i]} for i in range(len(embeddings))]
+    st.success(f"Stored {len(sections)} sections in Pinecone!")
 
-    try:
-        response = index.upsert(vectors=upsert_data)
-        st.success(f"Successfully upserted {len(embeddings)} vectors.")
-    except Exception as e:
-        st.error(f"Error during Pinecone upsert: {str(e)}")
-
-uploaded_file = st.file_uploader("Upload a PDF file", type="pdf")
-
-if uploaded_file:
-    # Process PDF
-    loader = PDFLoader(uploaded_file)
-    text_chunks = loader.text_chunks
-    structured_data = loader.structured_data
-
-    # Generate embeddings
-    embedding_generator = EmbeddingGenerator()
-    embeddings = embedding_generator.generate_embeddings(text_chunks)
-
-    # Store embeddings
-    metadata = [{"chunk_index": i, "source": "uploaded_pdf"} for i in range(len(embeddings))]
-    store_embeddings(index, embeddings, metadata)
-
-    # Display extracted structured sections
-    st.subheader("Extracted Sections")
-    for section, content in structured_data.items():
-        with st.expander(section):
-            st.write(content[:2000])  # Limit display to first 2000 chars
+    # Search query
+    query = st.text_input("Search for relevant sections:")
+    if query:
+        query_embedding = generate_embedding(query)
+        results = index.query(query_embedding, top_k=5, include_metadata=True)
+        
+        st.subheader("Search Results:")
+        for match in results["matches"]:
+            st.write(match["metadata"]["text"])
