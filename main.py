@@ -15,7 +15,6 @@ index_name = st.secrets["pinecone"]["INDEX_NAME"]
 
 # --- Initialize OpenAI & Pinecone ---
 openai.api_key = openai_api_key
-index = pinecone.GRPCIndex(index_name)
 
 # --- Tokenizer for Chunking ---
 tokenizer = tiktoken.get_encoding("cl100k_base")
