@@ -6,23 +6,17 @@ import uuid
 import pdfplumber
 from docx import Document
 
-# Load API keys and settings from Streamlit secrets
 openai_api_key = st.secrets["openai"]["api_key"]
 pinecone_api_key = st.secrets["pinecone"]["api_key"]
 pinecone_env = st.secrets["pinecone"]["ENV"]
 index_name = st.secrets["pinecone"]["INDEX_NAME"]
 
-# Initialize OpenAI
 openai.api_key = openai_api_key
 
-# Initialize Pinecone
-pinecone.init(api_key=pinecone_api_key, environment=pinecone_env)
-index = pinecone.GRPCIndex(index_name)
 
-# Tokenizer for chunking
 tokenizer = tiktoken.get_encoding("cl100k_base")
 
-# Function to extract text from PDF
+
 def extract_text_from_pdf(file):
     text = ""
     with pdfplumber.open(file) as pdf:
@@ -30,7 +24,7 @@ def extract_text_from_pdf(file):
             text += page.extract_text() + "\n"
     return text
 
-# Function to extract text from DOCX
+
 def extract_text_from_docx(file):
     doc = Document(file)
     return "\n".join([para.text for para in doc.paragraphs])
