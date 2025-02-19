@@ -6,15 +6,23 @@ import uuid
 import pdfplumber
 from docx import Document
 
-# Set API keys (use Streamlit secrets for deployment)
-openai.api_key = st.secrets["OPENAI_API_KEY"]
-pinecone.init(api_key=st.secrets["PINECONE_API_KEY"], environment="us-east-1")
-index = pinecone.Index("tender")
+# Load API keys and settings from Streamlit secrets
+openai_api_key = st.secrets["openai"]["api_key"]
+pinecone_api_key = st.secrets["pinecone"]["api_key"]
+pinecone_env = st.secrets["pinecone"]["ENV"]
+index_name = st.secrets["pinecone"]["INDEX_NAME"]
+
+# Initialize OpenAI
+openai.api_key = openai_api_key
+
+# Initialize Pinecone
+pinecone.init(api_key=pinecone_api_key, environment=pinecone_env)
+index = pinecone.GRPCIndex(index_name)
 
 # Tokenizer for chunking
 tokenizer = tiktoken.get_encoding("cl100k_base")
 
-# Function to extract text from a PDF
+# Function to extract text from PDF
 def extract_text_from_pdf(file):
     text = ""
     with pdfplumber.open(file) as pdf:
@@ -22,12 +30,12 @@ def extract_text_from_pdf(file):
             text += page.extract_text() + "\n"
     return text
 
-# Function to extract text from a DOCX file
+# Function to extract text from DOCX
 def extract_text_from_docx(file):
     doc = Document(file)
     return "\n".join([para.text for para in doc.paragraphs])
 
-# Function to chunk text into smaller sections
+# Function to chunk text
 def chunk_text(text, max_tokens=500):
     tokens = tokenizer.encode(text)
     chunks = [tokens[i:i+max_tokens] for i in range(0, len(tokens), max_tokens)]
