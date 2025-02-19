@@ -1,7 +1,6 @@
 import streamlit as st
 from pinecone import Pinecone
-import os
-from langchain.document_loaders import PyPDFLoader
+from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.vectorstores import Pinecone as LangchainPinecone
@@ -36,7 +35,7 @@ def process_and_store_pdf(uploaded_file):
     # Store embeddings in Pinecone
     vectorstore = LangchainPinecone.from_documents(chunks, embedding_model, index_name=PINECONE_INDEX)
 
-    return len(chunks)
+    return chunks  # Return chunks for display
 
 # Streamlit UI
 st.title("📄 PDF to Pinecone Storage")
@@ -44,5 +43,14 @@ st.title("📄 PDF to Pinecone Storage")
 uploaded_file = st.file_uploader("Upload a PDF", type="pdf")
 
 if uploaded_file:
-    num_chunks = process_and_store_pdf(uploaded_file)
-    st.success(f"Stored {num_chunks} chunks in Pinecone! 🚀")
+    chunks = process_and_store_pdf(uploaded_file)
+    num_chunks = len(chunks)
+    
+    st.success(f"✅ Stored {num_chunks} chunks in Pinecone! 🚀")
+
+    # Display chunks in an expandable section
+    with st.expander("📌 View Extracted Chunks"):
+        for i, chunk in enumerate(chunks):
+            st.markdown(f"**Chunk {i+1}:**")
+            st.write(chunk.page_content)
+            st.markdown("---")  # Add a separator
